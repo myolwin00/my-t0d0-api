@@ -1,79 +1,108 @@
-var express = require('express');
-var app = express();
+const express = require('express');
+const app = express();
+const router = express.Router();
+const {check,validationResult} = require('express-validator/check');
+const cors = require('cors');
+const {MongoClient, ObjectId} = require('mongodb');
+const bodyParser = require('body-parser');
 
-var mongojs = require('mongojs');
-var db = mongojs('todo', [ 'tasks' ]);
-
-var { check, validationResult } = require('express-validator/check');
-var cors = require('cors');
-
-var bodyParser = require('body-parser');
-app.use(bodyParser.urlencoded({ extended: false }));
+app.use(bodyParser.urlencoded({
+    extended: false
+}));
 app.use(bodyParser.json());
 app.use(cors());
+app.use("/", router);
 
-// curl -X POST localhost:8000/tasks -d "subject=Apple"
-app.post('/tasks', [
-    check('subject').exists()
-], function(req, res) {
+const url = "mongodb+srv://root:root@cluster0-3wkf7.mongodb.net/test?retryWrites=true";
+const DB_NAME = "todo";
+const COLLECTION_NAME = "tasks";
 
-    var errors = validationResult(req);
-    if (!errors.isEmpty()) {
-        return res.status(422).json({ errors: errors.array() })
-    }
-    var subject = req.body.subject;
-    db.tasks.insert({ subject, status: 0 }, function(err, data) {
-        res.json(data);
-    });
-});
+let collection;
 
-app.get('/tasks/:id', function(req, res) {
-    var id = req.params.id;
-    db.tasks.find({ '_id': mongojs.ObjectId(id) }, function(err, data) {
-        res.json(data);
-    });
-});
-
-app.get('/tasks', function(req, res) {
-    db.tasks.find(function(err, data) {
-        res.json(data);
-    });
-}).delete('/tasks', function(req, res) {
-    db.tasks.remove({status: 1}, function(err, data) {
-        res.json(data);
+router.route('/tasks')
+    .get(function (req, res) {
+        collection.find({}).toArray((error, result) => {
+            if (error) {
+                return response.status(500).send(error);
+            }
+            res.send(result);
+        });
     })
-});
-
-app.delete('/tasks/:id', function(req, res) {
-    var id = req.params.id;
-
-    db.tasks.remove({'_id': mongojs.ObjectId(id)}, function(err, data) {
-        if (err) {
-            console.log(err);
-            res.json({
-                msg: "error"
+    .post([check('subject').exists()], async function (req, res) {
+        var errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(422).json({
+                errors: errors.array()
             })
-        } else {
-            console.log(data);
-            res.json(data);            
         }
+        var subject = req.body.subject;
+        var _id = new ObjectId();
+        var task = {_id, subject, status: 0}
+        let r = await collection.insertOne(task);
+        res.json(task);
     })
-})
-// curl -X PATCH localhost:8000/tasks/5cbadbd15ac7390b5c4ad818 -d "status=1"
-.patch('/tasks/:id', function(req, res) {
-    var id = req.params.id;
-    var status = parseInt(req.body.status);
-    db.tasks.update(
-        { '_id': mongojs.ObjectId(id) },
-        { $set: { status } },
-        { multi: true },
-        function(err, data) {
+    .delete(function (req, res) {
+        collection.deleteMany({
+            status: 1
+        }, function (err, data) {
             res.json(data);
-        }
-    );
-});
+        })
+    });
 
-app.listen(8000, function() {
+router.route('/tasks/:id')
+    .get(function (req, res) {
+        var id = req.params.id;
+        collection.find({
+            '_id': mongojs.ObjectId(id)
+        }, function (err, data) {
+            res.json(data);
+        });
+    })
+    .delete(function (req, res) {
+        var id = req.params.id;
+
+        collection.deleteOne({
+            '_id': ObjectId(id)
+        }, function (err, data) {
+            if (err) {
+                console.log(err);
+                res.json({
+                    msg: "error"
+                })
+            } else {
+                console.log(data);
+                res.json(data);
+            }
+        })
+    })
+    .patch(function (req, res) {
+        var id = req.params.id;
+        var status = parseInt(req.body.status);
+        collection.updateOne({
+                '_id': ObjectId(id)
+            }, {
+                $set: {
+                    status
+                }
+            }, {
+                multi: true
+            },
+            function (err, data) {
+                res.json(data);
+            }
+        );
+    });
+
+app.listen(8000, function () {
     // node index.js
     console.log('todo api started at port 8000');
+
+    MongoClient.connect(url, {
+        useNewUrlParser: true
+    }, (error, client) => {
+        if (error) {
+            throw error;
+        }
+        collection = client.db(DB_NAME).collection(COLLECTION_NAME);
+    });
 });
